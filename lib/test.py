@@ -11,20 +11,20 @@ colorlist = ['white', 'red', 'blue', 'green', 'yellow', 'brown', 'purple', 'oran
 from line_recog import line_recog
 os.environ['CUDA_VISIBLE_DEVICES'] = ''
 
-threshold_overlaps = 0.8
-threshold_score    = 0.55
+threshold_overlaps = 0.5
+threshold_score    = 0.7
 def construct_graph(net,sess):
     net.create_arch(True,1)
     loss = net._add_losses()
     lr = tf.Variable(0.001,  trainable=False)
-    opt = tf.train.MomentumOptimizer(lr,0.9)
+    opt = tf.train.MomentumOptimizer(lr,0.09)
     graident = opt.compute_gradients(loss)
     train_opt= opt.apply_gradients(graident)
 
     return lr, train_opt
 
 if __name__ == '__main__':
-    loader = dataloader("/data/Challenge2_Training_Task12_Images", "/data/Challenge2_Training_Task1_GT")
+    loader = dataloader("../data/Challenge2_Training_Task12_Images", "../data/Challenge2_Training_Task1_GT")
 
     with tf.Session() as sess:
         net = vgg16()
@@ -34,18 +34,19 @@ if __name__ == '__main__':
         saver.restore(sess,"./checkpoint.ckpt")
         #init = tf.global_variables_initializer()
         #sess.run(init)
-        for i in range(0,50):
+        for i in range(0,150):
             blob = loader.fetch()
             roi_score, rois,rpn_cls_prob = net.test_image(sess,blob["data"],blob["im_info"])
             #roi_score, rois, rpn_cls_prob = net.test_image_train(sess,blob["data"],blob["im_info"],blob['gt_boxes'])
             index = np.where(roi_score>threshold_score)[0]
             print("roi_score_num : "+str(roi_score.shape[0])+" roi_index_num : "+str(index.shape[0]) )
             print(rois[index][:,1:5])
+
             overlaps = bbox_overlaps(rois[index][:,1:5], blob["gt_boxes"])
             print("bbox_overlaps debug")
             print(overlaps[np.where(overlaps>threshold_overlaps)])
             print(rois[np.where(overlaps>threshold_overlaps)[0]])
-            high_prob_roi = rois[index]#[np.where(overlaps>0.4)[0]]
+            high_prob_roi = rois[index][np.where(overlaps>threshold_overlaps)[0]]
 
             img = blob["pil_im"]
             brush = ImageDraw.Draw(img)

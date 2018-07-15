@@ -26,11 +26,11 @@ def get_variables_in_checkpoint_file(file_name):
         print("It's likely that your checkpoint file has been compressed "
               "with SNAPPY.")
 if __name__ == '__main__':
-    loader = dataloader("/data/Challenge2_Training_Task12_Images", "/data/Challenge2_Training_Task1_GT")
+    loader = dataloader("../data/Challenge2_Training_Task12_Images", "../data/Challenge2_Training_Task1_GT")
     MAX_ITERATION = 1000000
-    LR_DECAY_ITERATION = 1000
-    GAMMA = 0.5
-    INITIAL_LR = 0.001
+    LR_DECAY_ITERATION = 10000
+    GAMMA = 0.8
+    INITIAL_LR = 0.0001
     DISPLAY_ITERATION = 20
 
 
@@ -46,10 +46,10 @@ if __name__ == '__main__':
             print("checkpoint restored")
         else:
             variables = tf.global_variables()
-            var_keep_dic = get_variables_in_checkpoint_file("vgg16.ckpt")
+            var_keep_dic = get_variables_in_checkpoint_file("vgg_16.ckpt")
             variables_to_restore = net.get_variables_to_restore(variables, var_keep_dic)
             restorer = tf.train.Saver(variables_to_restore)
-            restorer.restore(sess, "vgg16.ckpt")
+            restorer.restore(sess, "vgg_16.ckpt")
 
         writer = tf.summary.FileWriter("./tensorboard",sess.graph)
         iteration = 1
@@ -57,7 +57,7 @@ if __name__ == '__main__':
         while iteration < MAX_ITERATION:
             blob = loader.fetch()
             if iteration % DISPLAY_ITERATION == 0:
-                loss, rpn_loss_box, rpn_loss_cls, rpn_label, rpn_cls_score,summary,rois = net.train_step_summary(sess, blob, train_opt)
+                loss, rpn_loss_box, rpn_loss_cls,  rpn_cls_score,summary,_,_,_ = net.train_step_summary(sess, blob, train_opt)
                 writer.add_summary(summary,float(iteration))
                 print("iteration:%d" % iteration)
                 print("loss : %.6f" % loss)
@@ -66,7 +66,7 @@ if __name__ == '__main__':
                 #print(rois)
 
             else:
-                loss,rpn_loss_box,rpn_loss_cls,rpn_label,rpn_cls_score,rois = net.train_step(sess,blob,train_opt)
+                loss,rpn_loss_box,rpn_loss_cls,rpn_cls_score,_,_,_ = net.train_step(sess,blob,train_opt)
 
 
             #print(rpn_cls_score)
@@ -75,9 +75,9 @@ if __name__ == '__main__':
                 saver.save(sess,"./checkpoint.ckpt")
 
 
-            #if iteration % LR_DECAY_ITERATION == 0:
-            #    INITIAL_LR *=GAMMA
-            #    sess.run(tf.assign(lr,INITIAL_LR))
+            if iteration % LR_DECAY_ITERATION == 0:
+                INITIAL_LR *= GAMMA
+                sess.run(tf.assign(lr,INITIAL_LR))
 
             iteration += 1
 
