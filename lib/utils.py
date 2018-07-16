@@ -15,8 +15,8 @@ def bbox_transform_inv_tf(boxes, delta):
 
     pred_center_x = tf.add(center_x, tf.multiply(w,dx))
     pred_center_y = tf.add(center_y, tf.multiply(h,dy))
-    pred_w = tf.multiply(w,dw)
-    pred_h = tf.multiply(h,dh)
+    pred_w = tf.multiply(tf.exp(dw),w)
+    pred_h = tf.multiply(tf.exp(dh),h)
 
     pred_boxes0 = tf.subtract(pred_center_x, pred_w*0.5)
     pred_boxes1 = tf.subtract(pred_center_y, pred_h*0.5)
