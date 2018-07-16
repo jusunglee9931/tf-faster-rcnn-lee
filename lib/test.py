@@ -12,7 +12,7 @@ from line_recog import line_recog
 os.environ['CUDA_VISIBLE_DEVICES'] = ''
 
 threshold_overlaps = 0.8
-threshold_score    = 0.55
+threshold_score    = 0.8
 def construct_graph(net,sess):
     net.create_arch(True,1)
     loss = net._add_losses()
@@ -44,8 +44,8 @@ if __name__ == '__main__':
             overlaps = bbox_overlaps(rois[index][:,1:5], blob["gt_boxes"])
             print("bbox_overlaps debug")
             print(overlaps[np.where(overlaps>threshold_overlaps)])
-            print(rois[np.where(overlaps>threshold_overlaps)[0]])
-            high_prob_roi = rois[index]#[np.where(overlaps>0.4)[0]]
+            print(rois[np.where(overlaps>threshold_score)[0]])
+            high_prob_roi = rois[index]#[np.where(overlaps>0.6)[0]]
 
             img = blob["pil_im"]
             brush = ImageDraw.Draw(img)
