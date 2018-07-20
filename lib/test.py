@@ -1,23 +1,36 @@
 from vgg16 import vgg16
 from dataloader import dataloader
-from utils import bbox_overlaps
+from utils import bbox_overlaps,bbox_transform_inv
 import tensorflow as tf
 import numpy as np
 import os,random
 from PIL import Image,ImageDraw,ImageFont
+from resnet_v1 import resnetv1
+from tensorflow.python import pywrap_tensorflow
+from line_recog import line_recog
 
 colorlist = ['white', 'red', 'blue', 'green', 'yellow', 'brown', 'purple', 'orange']
 
-from line_recog import line_recog
-os.environ['CUDA_VISIBLE_DEVICES'] = ''
+#os.environ['CUDA_VISIBLE_DEVICES'] = ''
 
-<<<<<<< HEAD
-threshold_overlaps = 0.8
-threshold_score    = 0.8
-=======
 threshold_overlaps = 0.5
-threshold_score    = 0.7
->>>>>>> 9b56b692768ad8baa4b60b9b7b2c9756406549ad
+threshold_score    = 0.5
+MODEL_CKPT ="vgg16.ckpt"
+
+def get_variables_in_checkpoint_file(file_name):
+    try:
+      reader = pywrap_tensorflow.NewCheckpointReader(file_name)
+      var_to_shape_map = reader.get_variable_to_shape_map()
+      return var_to_shape_map
+    except Exception as e:  # pylint: disable=broad-except
+      print(str(e))
+      if "corrupted compressed block contents" in str(e):
+        print("It's likely that your checkpoint file has been compressed "
+              "with SNAPPY.")
+def printmap(var_to_shape_map):
+    for v in var_to_shape_map:
+        print(v)
+
 def construct_graph(net,sess):
     net.create_arch(True,1)
     loss = net._add_losses()
@@ -32,8 +45,16 @@ if __name__ == '__main__':
     loader = dataloader("../data/Challenge2_Training_Task12_Images", "../data/Challenge2_Training_Task1_GT")
 
     with tf.Session() as sess:
+        #net = resnetv1(101)
         net = vgg16()
         net.create_arch(False, 1)
+        #variables = tf.global_variables()
+        #var_keep_dic = get_variables_in_checkpoint_file("./checkpoint.ckpt")
+        #printmap(var_keep_dic)
+        #variables_to_restore = net.get_variables_to_restore(variables, var_keep_dic)
+        #restorer = tf.train.Saver(variables_to_restore)
+        #restorer.restore(sess, MODEL_CKPT)
+
         #lr, train_opt = construct_graph(net, sess)
         saver =tf.train.Saver()
         saver.restore(sess,"./checkpoint.ckpt")
@@ -41,27 +62,29 @@ if __name__ == '__main__':
         #sess.run(init)
         for i in range(0,150):
             blob = loader.fetch()
-            roi_score, rois,rpn_cls_prob = net.test_image(sess,blob["data"],blob["im_info"])
+            roi_score, rois,rpn_cls_prob,cls_pred,bbox_pred = net.test_image(sess,blob["data"],blob["im_info"])
             #roi_score, rois, rpn_cls_prob = net.test_image_train(sess,blob["data"],blob["im_info"],blob['gt_boxes'])
-            index = np.where(roi_score>threshold_score)[0]
-            print("roi_score_num : "+str(roi_score.shape[0])+" roi_index_num : "+str(index.shape[0]) )
-            print(rois[index][:,1:5])
+            index = np.where(cls_pred == 1)[0]
+            print("roi_score_num : "+str(bbox_pred.shape[0])+" roi_index_num : "+str(index.shape[0]) )
+            #print(rois[index][:,1:5])
+            bbox = bbox_transform_inv(rois[:,1:5],bbox_pred)
+            print(bbox)
+            print(bbox.shape)
 
-            overlaps = bbox_overlaps(rois[index][:,1:5], blob["gt_boxes"])
+            bbox = bbox[index]
+            print(bbox.shape)
+
+            #overlaps = bbox_overlaps(rois[index][:,1:5], blob["gt_boxes"])
             print("bbox_overlaps debug")
-            print(overlaps[np.where(overlaps>threshold_overlaps)])
-<<<<<<< HEAD
-            print(rois[np.where(overlaps>threshold_score)[0]])
-            high_prob_roi = rois[index]#[np.where(overlaps>0.6)[0]]
-=======
-            print(rois[np.where(overlaps>threshold_overlaps)[0]])
-            high_prob_roi = rois[index][np.where(overlaps>threshold_overlaps)[0]]
->>>>>>> 9b56b692768ad8baa4b60b9b7b2c9756406549ad
+            #print(overlaps[np.where(overlaps>threshold_overlaps)])
+
+            #print(rois[np.where(overlaps>threshold_overlaps)[0]])
+            #high_prob_roi = rois[index][np.where(overlaps>threshold_overlaps)[0]]
 
             img = blob["pil_im"]
             brush = ImageDraw.Draw(img)
-            for row in range(high_prob_roi.shape[0]):
-                    box= [high_prob_roi[row,1],high_prob_roi[row,2],high_prob_roi[row,3],high_prob_roi[row,4]]
+            for row in range(bbox.shape[0]):
+                    box= [bbox[row,0], bbox[row,1], bbox[row,2], bbox[row,3] ]
                     c_idx = random.randrange(0, len(colorlist))
                     brush.rectangle([(box[0], box[1]), (box[2], box[3])], outline=colorlist[c_idx])
 

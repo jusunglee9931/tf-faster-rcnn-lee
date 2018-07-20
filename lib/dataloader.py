@@ -19,17 +19,22 @@ class dataloader(object):
 
     def getgt(self,index,ratio):
         filepath = self.list[index].split(".")[0]
-        filepath = os.path.join(self.gt_path,"gt_"+filepath+".txt")
+        filepath_ori = os.path.join(self.gt_path,"gt_"+filepath+".txt")
+        filepath_comma = os.path.join(self.gt_path,"gt_"+filepath+"_1.txt")
         gt_boxes = []
         #print(filepath)
-        f = open(filepath)
+        f = open(filepath_ori)
+        f_comma = open(filepath_comma,"w")
         while True :
             buffer = f.readline()
             if not buffer:
                 break
             buffer = buffer.split(" ")
             boxes = [int(buffer[0])/ratio,int(buffer[1])/ratio,int(buffer[2])/ratio,int(buffer[3])/ratio,int(1)]
+            f_comma.write(buffer[0]+", "+buffer[1]+", "+buffer[2]+", "+buffer[3]+" "+buffer[4])
             gt_boxes.append(boxes)
+        f.close()
+        f_comma.close()
         return np.asarray(gt_boxes).reshape((-1,5))
 
 
@@ -66,5 +71,5 @@ class dataloader(object):
 
 
 if __name__ == "__main__":
-    loader = dataloader("/data/Challenge2_Training_Task12_Images","/data/Challenge2_Training_Task1_GT")
+    loader = dataloader("../data/Challenge2_Test_Task12_Images","../data/Challenge2_Test_Task1_GT")
     loader.fetch()

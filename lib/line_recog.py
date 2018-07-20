@@ -194,7 +194,7 @@ class line_recog(object):
     def getboximg(self,factor):
         img = self.img
         brush = ImageDraw.Draw(img)
-        font = ImageFont.truetype(fontname, 10)
+        font = ImageFont.truetype(fontname, 20)
         for row in self.rowlist:
             boxes = row.getboxes()
             for box in boxes:
@@ -205,7 +205,7 @@ class line_recog(object):
                 fontsize = int((box[2]-box[0])*0.5)
                 font = ImageFont.truetype(fontname,fontsize )
                 c_idx = random.randrange(0, len(colorlist))
-                brush.rectangle([(box[0], box[1]), (box[2], box[3])], outline=colorlist[c_idx])
+                brush.rectangle([(box[0], box[1]), (box[2], box[3])],font=font, outline=colorlist[c_idx])
                 text = row.getword(int(box[5])).decode('EUC-KR')
                 #string = u'{0} {1:.2f}'.format(text, box[4])
                 #brush.text((box[0], box[1] - fontsize), string, font=font, fill=colorlist[c_idx])

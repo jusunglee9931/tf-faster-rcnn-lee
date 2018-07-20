@@ -14,13 +14,14 @@ class network(object):
         self._losses = {}
         self._layers = {}
         self._RPN_CHANNELS= 512
-        self._anchor_ratio = [0.2,0.4,0.8,1,2,3,4,5,6,7,8,9]
-        self._anchor_scale  = range(4,50)#[4,8,16,32,48,64,128,256]
+        self._anchor_ratio = [0.5,1,2,4,8]
+        self._anchor_scale  = [4,8,16,32,48,64]
         self._num_anchors = len(self._anchor_scale)*len(self._anchor_ratio)
-        self._threshold_for_label_zero = 0.3
-        self._threshold_for_label_one = 0.5
-        self._threshold_for_rois_fg    = 0.3
-        self._threshold_for_rois_bg    = 0.2
+        self._threshold_for_label_zero = 0.4
+        self._threshold_for_label_one = 0.6
+        self._threshold_for_rois_fg    = 0.6
+        self._threshold_for_rois_bg    = 0.4
+        self._pool_size = 7
 
 
 
@@ -56,10 +57,10 @@ class network(object):
     def __build__network(self,initializer,is_training):
         '''regino proposal block'''
         if is_training == True:
-            self.post_nms_topN = 500
+            self.post_nms_topN = 1200
             self.nms_thresh    = 0.7
         else:
-            self.post_nms_topN = 100
+            self.post_nms_topN = 300
             self.nms_thresh    = 0.7
 
         height = tf.to_int32(tf.ceil(self._im_info[0] / np.float32(self._feat_stride[0])))
@@ -94,16 +95,13 @@ class network(object):
                 rois, _ = self._proposal_target_layer(rois, scores)
         self._predictions["rois"] = rois
         self._predictions["rois_score"] = scores
-        #self._predictions["rois_prop"] = rois_prop
 
-        return rois
-
-
-
+        pool = self._crop_pool_layer(net_conv,rois,'crop_layer')
+        fc = self._head_to_tail(pool, is_training)
+        cls_prob,bbox_pred =  self._region_classification_layer(fc,is_training,initializer)
 
 
-
-
+        return rois , cls_prob, bbox_pred
 
     def _image_to_head(self , is_training, reuse=None):
         raise NotImplementedError
@@ -130,7 +128,7 @@ class network(object):
         self._predictions["proposals"] = proposals
         proposals = clip_boxes_tf(proposals,im)
 
-        '''
+
         indices = tf.image.non_max_suppression(proposals, scores, max_output_size = post_nms_topN, iou_threshold = nms_thresh)
         boxes = tf.gather(proposals,indices)
         boxes = tf.to_float(boxes)
@@ -142,7 +140,7 @@ class network(object):
         '''
         batch_inds = tf.zeros((tf.shape(proposals)[0], 1), dtype=tf.float32)
         blob = tf.concat([batch_inds, proposals], 1)
-
+        '''
 
         return blob, scores
 
@@ -277,7 +275,7 @@ class network(object):
     def _proposal_target_layer(self,rpn_rois,rpn_scores):
         rois, roi_scores, labels, bbox_targets, bbox_inside_weights, bbox_outside_weights = tf.py_func(
             self.__proposal_target_layer,
-            [rpn_rois, rpn_scores, self._gt_boxes, self._num_class],
+            [rpn_rois, rpn_scores, self._gt_boxes, self._num_class,self._im_info],
             [tf.float32, tf.float32, tf.float32, tf.float32, tf.float32, tf.float32],
             name="proposal_target")
 
@@ -298,7 +296,7 @@ class network(object):
         return rois, roi_scores
 
 
-    def __proposal_target_layer(self,rpn_rois,rpn_scores,gt_boxes,num_class):
+    def __proposal_target_layer(self,rpn_rois,rpn_scores,gt_boxes,num_class,im):
         #zeros = np.zeros((gt_boxes.shape[0],1), dtype=gt_boxes.dtype)
         #rpn_rois  = np.vstack((rpn_rois,np.hstack((zeros,gt_boxes[:,:-1]))))
         #rpn_scores= np.vstack((rpn_scores,zeros))
@@ -312,7 +310,7 @@ class network(object):
         #print(debug_idx)
         #print(debug_idx2)
         labels, rois, roi_scores,bbox_targets, bbox_inside_weights = _sample_rois(
-            rpn_rois,rpn_scores,gt_boxes,num_class,self._threshold_for_rois_fg,self._threshold_for_rois_bg
+            rpn_rois,rpn_scores,gt_boxes,num_class,self._threshold_for_rois_fg, self._threshold_for_rois_bg,im
         )
 
         rois = rois.reshape(-1, 5)
@@ -327,7 +325,42 @@ class network(object):
 
 
 
-    #def __region_classification_layer(self,fc7,is_training, initializer,initializer_bbox):
+    def _region_classification_layer(self,fc7,is_training, initializer):
+        cls_score = tf.layers.dense(fc7, self._num_class,
+                                         kernel_initializer=initializer,
+                                         trainable=is_training,
+                                         name='cls_score')
+
+        cls_prob = self._softmax_layer(cls_score, "cls_prob")
+        cls_pred = tf.argmax(cls_score, axis=1, name="cls_pred")
+        bbox_pred = tf.layers.dense(fc7, self._num_class * 4,
+                                         kernel_initializer=initializer,
+                                         trainable=is_training,
+                                         name='bbox_pred')
+
+        self._predictions["cls_score"] = cls_score
+        self._predictions["cls_pred"] = cls_pred
+        self._predictions["cls_prob"] = cls_prob
+        self._predictions["bbox_pred"] = bbox_pred
+
+        return cls_prob, bbox_pred
+
+    def _crop_pool_layer(self, bottom, rois, name):
+        with tf.variable_scope(name) as scope:
+            batch_ids = tf.squeeze(tf.slice(rois, [0, 0], [-1, 1], name="batch_id"), [1])
+            # Get the normalized coordinates of bboxes
+            bottom_shape = tf.shape(bottom)
+            height = (tf.to_float(bottom_shape[1]) - 1.) * np.float32(self._feat_stride[0])
+            width = (tf.to_float(bottom_shape[2]) - 1.) * np.float32(self._feat_stride[0])
+            x1 = tf.slice(rois, [0, 1], [-1, 1], name="x1") / width
+            y1 = tf.slice(rois, [0, 2], [-1, 1], name="y1") / height
+            x2 = tf.slice(rois, [0, 3], [-1, 1], name="x2") / width
+            y2 = tf.slice(rois, [0, 4], [-1, 1], name="y2") / height
+            # Won't be back-propagated to rois anyway, but to save time
+            bboxes = tf.stop_gradient(tf.concat([y1, x1, y2, x2], 1))
+            crops = tf.image.crop_and_resize(bottom, bboxes, tf.to_int32(batch_ids), [self._pool_size, self._pool_size],
+                                             name="crops")
+        return crops
 
     def __generate_anchor(self,width,height,feat_stride):
 
@@ -376,14 +409,37 @@ class network(object):
             self._losses['rpn_cross_entropy'] = rpn_cross_entropy
             self._losses['rpn_loss_box'] = rpn_loss_box
 
-            loss =  rpn_cross_entropy + rpn_loss_box
+            cls_score = self._predictions["cls_score"]
+            label = tf.reshape(self._proposal_targets["labels"], [-1])
+            cross_entropy = tf.reduce_mean(
+                tf.nn.sparse_softmax_cross_entropy_with_logits(logits=cls_score, labels=label))
+
+            bbox_pred = self._predictions['bbox_pred']
+            bbox_targets = self._proposal_targets['bbox_targets']
+            bbox_inside_weights = self._proposal_targets['bbox_inside_weights']
+            bbox_outside_weights = self._proposal_targets['bbox_outside_weights']
+            loss_box = self._smooth_l1_loss(bbox_pred, bbox_targets, bbox_inside_weights, bbox_outside_weights)
+
+            self._losses['cross_entropy'] = cross_entropy
+            self._losses['loss_box'] = loss_box
+
+
+
+
+            loss =  rpn_cross_entropy + rpn_loss_box + cross_entropy + loss_box
             #regularization_loss = tf.add_n(tf.losses.get_regularization_losses(), 'regu')
             self._losses['total_loss'] = loss #+ regularization_loss
+
+
+
+
+
 
             tf.summary.scalar('total_loss',loss)
             tf.summary.scalar('rpn_cross_entropy', rpn_cross_entropy)
             tf.summary.scalar('rpn_loss_box', rpn_loss_box)
             self.summary = tf.summary.merge_all()
+
 
 
         return loss
@@ -413,43 +469,41 @@ class network(object):
     def train_step(self, sess, blobs ,train_op):
         feed_dict = {self._image: blobs['data'], self._im_info: blobs['im_info'],
                  self._gt_boxes: blobs['gt_boxes']}
-        rpn_loss_cls, rpn_loss_box, loss,rpn_cls_score,opt,rpn_cls_score_reshape,scores,rpn_cls_prob = sess.run([self._losses["rpn_cross_entropy"],
+        rpn_loss_cls, rpn_loss_box, loss,loss_cls,loss_box,opt = sess.run([self._losses["rpn_cross_entropy"],
                                                                         self._losses['rpn_loss_box'],
                                                                         self._losses['total_loss'],
-                                                                        self._losses['rpn_cls_score'],
-                                                                        train_op,
-                                                                        self._predictions["rpn_cls_score_reshape"],
-                                                                        self._debug["scores"],
-                                                                        self._debug["rpn_cls_prob"]
+                                                                        self._losses['cross_entropy'],
+                                                                        self._losses['loss_box'],
+                                                                        train_op
                                                                         ],
                                                                        feed_dict=feed_dict)
-        return loss,rpn_loss_box,rpn_loss_cls,rpn_cls_score,rpn_cls_score_reshape,scores,rpn_cls_prob
+        return loss,rpn_loss_box,rpn_loss_cls,loss_box,loss_cls
     def train_step_summary(self, sess, blobs ,train_op):
         feed_dict = {self._image: blobs['data'], self._im_info: blobs['im_info'],
                  self._gt_boxes: blobs['gt_boxes']}
-        rpn_loss_cls, rpn_loss_box, loss,rpn_cls_score,summary,_,rpn_cls_score_reshape,scores,rpn_cls_prob = sess.run([self._losses["rpn_cross_entropy"],
+        rpn_loss_cls, rpn_loss_box, loss, loss_cls, loss_box, summary,opt= sess.run([self._losses["rpn_cross_entropy"],
                                                                         self._losses['rpn_loss_box'],
                                                                         self._losses['total_loss'],
-                                                                        self._losses['rpn_cls_score'],
+                                                                        self._losses['cross_entropy'],
+                                                                        self._losses['loss_box'],
                                                                         self.summary,
                                                                         train_op,
-                                                                        self._predictions["rpn_cls_score_reshape"],
-                                                                        self._debug["scores"],
-                                                                        self._debug["rpn_cls_prob"]
                                                                         ],
                                                                        feed_dict=feed_dict)
-        return loss,rpn_loss_box,rpn_loss_cls,rpn_cls_score,summary,rpn_cls_score_reshape,scores,rpn_cls_prob
+        return loss,rpn_loss_box,rpn_loss_cls,loss_box,loss_cls,summary
 
     def test_image(self, sess, image, im_info):
         feed_dict = {self._image: image,
                      self._im_info: im_info}
-        rois_score, rois,rpn_cls_prob = sess.run([self._predictions["rois_score"],
+        rois_score, rois,rpn_cls_prob ,cls_pred, bbox_pred= sess.run([self._predictions["rois_score"],
                            self._predictions["rois"],
                            self._predictions["rpn_cls_prob"],
+                           self._predictions["cls_pred"],
+                           self._predictions["bbox_pred"]
                         ],
                         feed_dict=feed_dict)
 
-        return rois_score, rois, rpn_cls_prob
+        return rois_score, rois, rpn_cls_prob,cls_pred,bbox_pred
     def test_image_train(self, sess, image, im_info,gt_boxes):
         feed_dict = {self._image: image,
                      self._im_info: im_info,

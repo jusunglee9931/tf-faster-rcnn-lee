@@ -22,23 +22,34 @@ class vgg16(network):
     self._feat_compress = [1. / float(self._feat_stride[0]), ]
     self._scope = 'vgg_16'
     self._variables_to_fix = {}
+  def _max_pooling_stage(self,net, stage,name,size = [2,2]):
+    with tf.variable_scope(name):
+      for i in range(stage):
+        net = slim.max_pool2d(net,size,padding='SAME', scope='pool'+str(i))
+    return net
+
+
 
   def _image_to_head(self, is_training, reuse=None):
     with tf.variable_scope(self._scope, self._scope, reuse=reuse):
       net = slim.repeat(self._image, 2, slim.conv2d, 64, [3, 3],
                           trainable=False, scope='conv1')
       net = slim.max_pool2d(net, [2, 2], padding='SAME', scope='pool1')
+      net_one = self._max_pooling_stage(net,3,"first")
       net = slim.repeat(net, 2, slim.conv2d, 128, [3, 3],
                         trainable=False, scope='conv2')
       net = slim.max_pool2d(net, [2, 2], padding='SAME', scope='pool2')
+      net_two = self._max_pooling_stage(net, 2, "second")
       net = slim.repeat(net, 3, slim.conv2d, 256, [3, 3],
                         trainable=False, scope='conv3')
       net = slim.max_pool2d(net, [2, 2], padding='SAME', scope='pool3')
+      net_three = self._max_pooling_stage(net, 1, "third")
       net = slim.repeat(net, 3, slim.conv2d, 512, [3, 3],
                         trainable=False, scope='conv4')
       net = slim.max_pool2d(net, [2, 2], padding='SAME', scope='pool4')
       net = slim.repeat(net, 3, slim.conv2d, 512, [3, 3],
                         trainable=False, scope='conv5')
+      net = tf.concat([net,net_one,net_two,net_three],3)
 
     #self._act_summaries.append(net)
     self._layers['head'] = net

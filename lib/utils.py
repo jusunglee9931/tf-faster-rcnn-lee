@@ -24,28 +24,43 @@ def bbox_transform_inv_tf(boxes, delta):
     pred_boxes3 = tf.add(pred_center_y, pred_h * 0.5)
 
     return tf.stack([pred_boxes0,pred_boxes1,pred_boxes2, pred_boxes3],axis= 1)
-'''
-def bbox_transform_inv_tf(boxes):
-    w = tf.subtract(boxes[:,2], boxes[:,0]) + 1.0
-    h = tf.subtract(boxes[:,3], boxes[:,1]) + 1.0
-    center_x = tf.add(boxes[:,0], w*0.5)
-    center_y = tf.add(boxes[:,1], h*0.5)
 
 
-    pred_boxes0 = tf.subtract(center_x, w*0.5)
-    pred_boxes1 = tf.subtract(center_y, h*0.5)
-    pred_boxes2 = tf.add(center_x, w * 0.5)
-    pred_boxes3 = tf.add(center_y, h * 0.5)
+def bbox_transform_inv(boxes, delta):
+    w = boxes[:,2] - boxes[:,0] + 1.0
+    h = boxes[:,3] - boxes[:,1] + 1.0
+    center_x = boxes[:,0] + w*0.5
+    center_y = boxes[:,1] + h*0.5
 
-    return tf.stack([pred_boxes0,pred_boxes1,pred_boxes2, pred_boxes3],axis= 1)
+    dx = delta[:,0]
+    dy = delta[:,1]
+    dw = delta[:,2]
+    dh = delta[:,3]
 
-'''
+    pred_center_x = center_x + w * dx
+    pred_center_y = center_y + h * dy
+    pred_w = np.exp(dw) * w
+    pred_h = np.exp(dh) * h
+
+    pred_boxes0 = pred_center_x - pred_w* 0.5
+    pred_boxes1 = pred_center_y - pred_h* 0.5
+    pred_boxes2 = pred_center_x + pred_w * 0.5
+    pred_boxes3 = pred_center_y + pred_h * 0.5
+
+    return np.hstack([pred_boxes0.reshape(-1,1),pred_boxes1.reshape(-1,1),pred_boxes2.reshape(-1,1), pred_boxes3.reshape(-1,1)])
 def clip_boxes_tf(boxes, im):
     b0 = tf.maximum(tf.minimum(boxes[:, 0], im[1] - 1), 0)
     b1 = tf.maximum(tf.minimum(boxes[:, 1], im[0] - 1), 0)
     b2 = tf.maximum(tf.minimum(boxes[:, 2], im[1] - 1), 0)
     b3 = tf.maximum(tf.minimum(boxes[:, 3], im[0] - 1), 0)
     return tf.stack([b0,b1,b2,b3], axis= 1)
+
+def clip_boxes(boxes, im):
+    b0 = np.maximum(np.minimum(boxes[:, 0], im[1] - 1), 0)
+    b1 = np.maximum(np.minimum(boxes[:, 1], im[0] - 1), 0)
+    b2 = np.maximum(np.minimum(boxes[:, 2], im[1] - 1), 0)
+    b3 = np.maximum(np.minimum(boxes[:, 3], im[0] - 1), 0)
+    return np.stack([b0,b1,b2,b3], axis= 1)
 
 def bbox_transform_tf(rois, gt_rois):
     rois_width  = rois[:,2] - rois[:,0]
@@ -138,7 +153,7 @@ def bbox_overlaps(boxes, gt_boxes):
     return np.maximum(overlaps,0)
 
 
-def _sample_rois(all_rois,all_scores, gt_boxes,num_class,threshold_fg, threshold_bg):
+def _sample_rois(all_rois,all_scores, gt_boxes,num_class,threshold_fg, threshold_bg,im):
     #find overlaps -> cal iou..
     #print(gt_boxes)
     #print(all_rois)
@@ -149,12 +164,33 @@ def _sample_rois(all_rois,all_scores, gt_boxes,num_class,threshold_fg, threshold
     labels = gt_boxes[gt_assignment,-1]
 
     #get index of fg,bg based on argmax
-    fg_inds = np.where(max_overlaps >= threshold_fg)
-    bg_inds = np.where(np.logical_and(max_overlaps < threshold_bg,max_overlaps > 0.0))
+    fg_index = np.where(max_overlaps >= threshold_fg)[0]
+    bg_index = np.where(max_overlaps < threshold_bg)[0]
 
-    keep_inds = np.append(fg_inds,bg_inds)
+   # print(fg_index)
+   # print(bg_index)
+
+    fg_index_len = len(fg_index)
+    bg_index_len = len(bg_index)
+
+    if fg_index_len > bg_index_len:
+        fg_index = np.random.choice(fg_index, size=(bg_index_len), replace=False)
+    else:
+        if fg_index_len == 0:
+            bg_index = np.random.choice(bg_index, size=(1), replace=False)
+        else:
+            bg_index = np.random.choice(bg_index, size=(fg_index_len ), replace=False)
+
+
+
+
+    keep_inds = np.append(fg_index,bg_index)
+    #print(keep_inds)
+    #print(np.where(labels == 0))
     labels = labels[keep_inds]
+    labels[fg_index_len:] = 0
     rois = all_rois[keep_inds]
+    print(labels)
 
     '''
     for debug only..
@@ -177,6 +213,7 @@ def _sample_rois(all_rois,all_scores, gt_boxes,num_class,threshold_fg, threshold
 
 
     targets = bbox_transform(rois[:,1:5],gt_boxes)
+    clip_boxes(targets,im)
 
     '''
     box_target_data = N x (class, tx, ty, tw, th)

@@ -1,4 +1,5 @@
 from vgg16 import vgg16
+from resnet_v1 import resnetv1
 from dataloader import dataloader
 import tensorflow as tf
 from tensorflow.python import pywrap_tensorflow
@@ -10,8 +11,9 @@ def construct_graph(net,sess,initial_lr = 0.001):
     loss = net._add_losses()
     lr = tf.Variable(initial_lr,  trainable=False)
     opt = tf.train.MomentumOptimizer(lr,0.9)
-    graident = opt.compute_gradients(loss)
-    train_opt= opt.apply_gradients(graident)
+    #graident = opt.compute_gradients(loss)
+    #train_opt= opt.apply_gradients(graident)
+    train_opt = tf.contrib.training.create_train_op(loss,opt)
 
     return lr, train_opt
 
@@ -32,10 +34,12 @@ if __name__ == '__main__':
     GAMMA = 0.8
     INITIAL_LR = 0.0001
     DISPLAY_ITERATION = 20
+    MODEL_CKPT = "vgg16.ckpt"
 
 
     with tf.Session() as sess:
         net = vgg16()
+        #net = resnetv1(101)
         lr, train_opt  = construct_graph(net,sess,INITIAL_LR)
         init = tf.global_variables_initializer()
         sess.run(init)
@@ -46,10 +50,10 @@ if __name__ == '__main__':
             print("checkpoint restored")
         else:
             variables = tf.global_variables()
-            var_keep_dic = get_variables_in_checkpoint_file("vgg_16.ckpt")
+            var_keep_dic = get_variables_in_checkpoint_file(MODEL_CKPT)
             variables_to_restore = net.get_variables_to_restore(variables, var_keep_dic)
             restorer = tf.train.Saver(variables_to_restore)
-            restorer.restore(sess, "vgg_16.ckpt")
+            restorer.restore(sess, MODEL_CKPT)
 
         writer = tf.summary.FileWriter("./tensorboard",sess.graph)
         iteration = 1
@@ -57,16 +61,18 @@ if __name__ == '__main__':
         while iteration < MAX_ITERATION:
             blob = loader.fetch()
             if iteration % DISPLAY_ITERATION == 0:
-                loss, rpn_loss_box, rpn_loss_cls,  rpn_cls_score,summary,_,_,_ = net.train_step_summary(sess, blob, train_opt)
+                loss, rpn_loss_box, rpn_loss_cls,  loss_box,loss_cls,summary = net.train_step_summary(sess, blob, train_opt)
                 writer.add_summary(summary,float(iteration))
                 print("iteration:%d" % iteration)
                 print("loss : %.6f" % loss)
                 print("rpn_loss_box : %.6f" % rpn_loss_box)
-                print("rpn_loss_cls : %.6f\n" % rpn_loss_cls)
+                print("rpn_loss_cls : %.6f" % rpn_loss_cls)
+                print("loss_box : %.6f" % loss_box)
+                print("loss_cls : %.6f" % loss_cls)
                 #print(rois)
 
             else:
-                loss,rpn_loss_box,rpn_loss_cls,rpn_cls_score,_,_,_ = net.train_step(sess,blob,train_opt)
+                loss, rpn_loss_box, rpn_loss_cls, loss_box, loss_cls = net.train_step(sess,blob,train_opt)
 
 
             #print(rpn_cls_score)
